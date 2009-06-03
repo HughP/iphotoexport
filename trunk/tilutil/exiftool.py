@@ -82,7 +82,7 @@ def get_iptc_data(image_file):
 
 def update_iptcdata(filepath, new_caption, new_keywords): 
   """Updates the caption and keywords of an image file."""
-  tmp = tempfile.mkstemp(dir="/var/tmp")
+  tmp = tempfile.mkstemp(dir="/var/tmp")[1]
   file1 = open(tmp, "w")
   if not new_caption:
     # Setting the caption to an empty string for some reason dosn't work
