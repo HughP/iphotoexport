@@ -20,11 +20,12 @@ import xml.dom
 import xml.dom.minidom
 import xml.sax.handler
 
-APPLE_BASE = datetime.date(2001, 1, 1)
+#APPLE_BASE = time.mktime((2001, 1, 1, 0, 0, 0, 0, 0, -1))
+APPLE_BASE = 978307200 # 2001/1/1
 
 def getappletime(value):
   '''Converts a numeric Apple time stamp into a date and time'''
-  return APPLE_BASE + datetime.timedelta(seconds=float(value))
+  return datetime.datetime.fromtimestamp(APPLE_BASE + float(value))
 
 class AppleXMLResolver(xml.sax.handler.EntityResolver): #IGNORE:R0903
   '''Helper to deal with XML entity resolving'''

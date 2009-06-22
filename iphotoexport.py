@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import sys
+import unicodedata
 
 from optparse import OptionParser
 
@@ -69,7 +70,7 @@ def album_util_make_filename(name):
       result += '-'
     else:
       result += ' '
-  return result
+  return unicodedata.normalize("NFC", result)
 
 
 def compare_keywords(new_keywords, old_keywords):
@@ -106,7 +107,7 @@ def delete_album_file(album_file, albumdirectory, msg, options):
       file_list = os.listdir(album_file)
       for subfile in file_list:
         delete_album_file(os.path.join(album_file, subfile), albumdirectory,
-                          msg)
+                          msg, options)
       os.rmdir(album_file)
     else:
       os.remove(album_file)
@@ -219,30 +220,38 @@ class ExportFile(object):
     if not sysutils.getfileextension(export_file) in ("jpg", "tif", "png"):
       return False
 
-    changed = False
-
     new_caption = self.photo.comment
     if new_caption is None:
       new_caption = ""
     else:
       new_caption = new_caption.strip()
-    file_keywords, file_caption = exiftool.get_iptc_data(export_file)
+    file_keywords, file_caption, date_time_original = exiftool.get_iptc_data(
+        export_file)
     if not sysutils.equalscontent(file_caption, new_caption):
       print ('Updating IPTC for %s because it has Caption "%s" instead of '
              '"%s".') % (export_file, file_caption, new_caption)
-      changed = True
+    else:
+      new_caption = None
 
     new_keywords = self.photo.keywords
     for keyword in self.photo.getfaces():
       if not keyword in new_keywords:
         new_keywords.append(keyword)
     if not compare_keywords(new_keywords, file_keywords):
-      changed = True
       print "Updating IPTC for %s because of keywords (%s instead of %s)" % (
           export_file, ",".join(file_keywords), ",".join(new_keywords))
+    else:
+      new_keywords = None
 
-    if changed:
-      exiftool.update_iptcdata(export_file, new_caption, new_keywords)
+    new_date = None
+    if date_time_original != self.photo.date:
+      print "Updating IPTC for %s because of date (%s instead of %s)" % (
+          export_file, date_time_original, self.photo.date)
+      new_date = self.photo.date
+      
+    if new_caption or new_keywords or new_date:
+      exiftool.update_iptcdata(export_file, new_caption, new_keywords, 
+                               new_date)
       return True
     return False
 
@@ -278,6 +287,12 @@ class ExportDirectory(object):
   def make_album_basename(self, orig_basename):
     """creates unique file name."""
     album_basename = None
+
+    # default image caption filenames have the file extension on them already,
+    # so remove it or the export filename will look like "IMG 0087 JPG.jpg"
+    orig_basename = re.sub(re.compile(r'\.(jpeg|jpg|png|tif|tiff)$',
+                                      re.IGNORECASE), '', orig_basename)
+
     base_name = album_util_make_filename(orig_basename)
     index = 0
     while True:
@@ -302,7 +317,8 @@ class ExportDirectory(object):
       if is_ignore(f):
         continue
 
-      album_file = os.path.join(self.albumdirectory, f)
+      album_file = unicodedata.normalize("NFC", 
+                                         os.path.join(self.albumdirectory, f))
       if os.path.isdir(album_file):
         if f == "Originals" and options.originals:
           self.scan_originals(album_file, options)
@@ -312,7 +328,8 @@ class ExportDirectory(object):
                             "Obsolete export directory", options)
           continue
 
-      base_name = sysutils.getfilebasename(album_file)
+      base_name = unicodedata.normalize("NFC", 
+                                        sysutils.getfilebasename(album_file))
       master_file = self.files.get(base_name)
 
       # everything else must have a master, or will have to go
@@ -337,7 +354,8 @@ class ExportDirectory(object):
                         "Obsolete export Originals directory", options)
         continue
 
-      base_name = sysutils.getfilebasename(originalfile)
+      base_name = unicodedata.normalize("NFC", 
+                                        sysutils.getfilebasename(originalfile))
       master_file = self.files.get(base_name)
 
       # everything else must have a master, or will have to go
@@ -452,7 +470,11 @@ class ExportLibrary(object):
     if os.path.split(directory)[1] in exclude_folders:
       return True
     contains_albums = False
-    file_list = os.listdir(directory)
+    # passing a unicode directory name gives back unicode filenames, passing a
+    # str directory name gives back str filenames. On MacOS, filenames come back
+    # in Unicode Normalization Form D, so force to form C.
+    file_list = [ unicodedata.normalize("NFC", nfd) 
+                 for nfd in os.listdir(unicode(directory)) ]
     for f in file_list:
       album_file = os.path.join(directory, f)
       if os.path.isdir(album_file):

@@ -226,7 +226,7 @@ class IPhotoImage(object):
     self.data = data
     self.caption = data.get("Caption")
     self.comment = data.get("Comment")
-    self.date = data.get("DateAsTimerInterval")
+    self.date = applexml.getappletime(data.get("DateAsTimerInterval"))
     self.image_path = data.get("ImagePath")
 
     self.keywords = []
