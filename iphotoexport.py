@@ -18,6 +18,7 @@
 import os
 import re
 import shutil
+import string
 import sys
 import unicodedata
 
@@ -60,7 +61,7 @@ def make_foldername(name):
 
 def album_util_make_filename(name):
   """Returns a valid file name by replacing problematic characters."""
-  result = ""
+  result = u""
   for c in name:
     if c.isalpha() or c.isdigit() or c.isspace():
       result += c
@@ -268,23 +269,25 @@ class ExportDirectory(object):
     self.albumdirectory = albumdirectory
     self.files = {}
 
-  def process_albums(self, images, export_movies):
-    """# Works through a directory tree, and discovers albums (directories).."""
+  def process_albums(self, images, export_movies, name_template):
+    """Works through an image folder tree, and builds data for exporting."""
     entries = 0
+    template = string.Template(name_template)
 
     if images is not None:
       for image in images:
         if image.ismovie() and not export_movies:
           continue
         base_name = image.getcaption()
-        album_basename = self.make_album_basename(base_name)
+        album_basename = self.make_album_basename(base_name, entries + 1,
+                                                  template)
         picture_file = ExportFile(image, self.albumdirectory, album_basename)
         self.files[album_basename] = picture_file
         entries += 1
 
     return entries
 
-  def make_album_basename(self, orig_basename):
+  def make_album_basename(self, orig_basename, index, name_template):
     """creates unique file name."""
     album_basename = None
 
@@ -292,8 +295,9 @@ class ExportDirectory(object):
     # so remove it or the export filename will look like "IMG 0087 JPG.jpg"
     orig_basename = re.sub(re.compile(r'\.(jpeg|jpg|png|tif|tiff)$',
                                       re.IGNORECASE), '', orig_basename)
-
-    base_name = album_util_make_filename(orig_basename)
+    formatted_name = name_template.safe_substitute({"index" : index, 
+                                                    "caption" : orig_basename })
+    base_name = album_util_make_filename(formatted_name)
     index = 0
     while True:
       album_basename = base_name
@@ -395,7 +399,7 @@ class ExportLibrary(object):
       i += 1
 
   def process_albums(self, albums, album_types, folder_prefix, includes,
-                     excludes, export_movies):
+                     excludes, export_movies, name_template, matched=False):
     """Walks trough an iPhoto album tree, and discovers albums (directories)."""
     entries = 0
 
@@ -413,9 +417,13 @@ class ExportLibrary(object):
 
       # check the album type
       if sub_album.albumtype == "Folder":
+        sub_matched = matched
+        if include_pattern.match(sub_name):
+          sub_matched = True
         self.process_albums(sub_album.albums, album_types,
                            folder_prefix + make_foldername(sub_name) + "/",
-                           includes, excludes, export_movies)
+                           includes, excludes, export_movies, name_template,
+                           sub_matched)
         continue
       elif (sub_album.albumtype == "None" or
             not sub_album.albumtype in album_types):
@@ -423,7 +431,7 @@ class ExportLibrary(object):
         # sub_album.albumtype
         continue
 
-      if not include_pattern.match(sub_name):
+      if not matched and not include_pattern.match(sub_name):
         continue
 
       if exclude_pattern and exclude_pattern.match(sub_name):
@@ -438,13 +446,15 @@ class ExportLibrary(object):
 
       # first, do the sub-albums
       if self.process_albums(sub_album.albums, album_types, folder_prefix,
-                            includes, excludes, export_movies) > 0:
+                            includes, excludes, export_movies, name_template,
+                            matched) > 0:
         entries += 1
 
       # now the album itself
       picture_directory = ExportDirectory(
           sub_name, sub_album, os.path.join(self.albumdirectory, sub_name))
-      if picture_directory.process_albums(sub_album.images, export_movies) > 0:
+      if picture_directory.process_albums(sub_album.images, export_movies,
+                                          name_template) > 0:
         self.named_folders[sub_name] = picture_directory
         entries += 1
 
@@ -514,16 +524,19 @@ def export_iphoto(data, export_dir, excludes, exclude_folders, options):
   album = ExportLibrary(os.path.join(export_dir))
   if options.events is not None:
     album.process_albums(data.rolls, ["Event"], "", 
-                         options.events, excludes, options.movies)
+                         options.events, excludes, options.movies, 
+                         options.nametemplate)
 
   if options.albums is not None:
     # ignore: Selected Event Album, Special Roll, Special Month
     album.process_albums(data.masteralbum.albums, ["Regular", "Published"], "",
-                         options.albums, excludes, options.movies)
+                         options.albums, excludes, options.movies,
+                         options.nametemplate)
 
   if options.smarts is not None:
     album.process_albums(data.masteralbum.albums, ["Smart"], "", 
-                         options.smarts, excludes, options.movies)
+                         options.smarts, excludes, options.movies,
+                         options.nametemplate)
 
   print "Scanning existing files in export folder..."
   album.load_album(options, exclude_folders)
@@ -580,6 +593,9 @@ def main():
       help="""Use links instead of copying files. Use with care, as changes made
       to the exported files will affect the image that is stored in the iPhoto
       library.""")
+  parser.add_option(
+      "-n", "--nametemplate", default="${caption}",
+      help="""Template for naming image files. Default: "${caption}".""")
   parser.add_option("-o", "--originals", action="store_true", 
                     help="Export original files into Originals.")
   parser.add_option("--pictures", action="store_false", dest="movies",

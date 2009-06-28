@@ -20,6 +20,7 @@ Created on May 29, 2009
 
 import filecmp
 import os
+import subprocess
 
 def execandcombine(command):
   """execute a shell command, and return all output in a single string."""
@@ -29,7 +30,7 @@ def execandcombine(command):
 
 def execandcapture(command):
   """execute a shell command, and return output lines in a sequence."""
-  pipe = os.popen(command)
+  pipe = subprocess.Popen(command, shell=False, stdout=subprocess.PIPE).stdout
   data = []
   while True:
     line = pipe.readline()
