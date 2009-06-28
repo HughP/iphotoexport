@@ -30,9 +30,11 @@ import xml.sax.handler
 
 import systemutils
 
+_EXIFTOOL = "/usr/bin/exiftool"
+
 def check_exif_tool():
   """Tests if a compatible version of exiftool is available."""
-  output = systemutils.execandcombine("exiftool -ver")
+  output = systemutils.execandcombine((_EXIFTOOL, "-ver"))
   try:
     version = float(output)
     if version < 7.47:
@@ -46,8 +48,7 @@ the new -X option to read IPTC data in XML format."""
   except ValueError:
     print >> sys.stderr, """Cannot execute "exiftool".
 
-Make sure you have exiftool installed, and set your PATH environment variable
-to include the folder where your copy of exiftool resides. You can download a
+Make sure you have exiftool installed as /usr/bin/exiftool. You can download a
 copy from http://www.sno.phy.queensu.ca/~phil/exiftool/.
 """
   return False
@@ -56,8 +57,8 @@ copy from http://www.sno.phy.queensu.ca/~phil/exiftool/.
 def get_iptc_data(image_file):
   """get caption and keywords all in one operation."""
   output = systemutils.execandcombine(
-      "exiftool -X -m -q -q -Keywords -Caption-Abstract -DateTimeOriginal "
-      "'%s'" % (image_file.encode('utf8')))
+      (_EXIFTOOL, "-X", "-m", "-q", "-q", "-Keywords", "-Caption-Abstract",
+       "-DateTimeOriginal", "%s" % (image_file.encode('utf8'))))
 
   keywords = []
   caption = None
@@ -97,7 +98,7 @@ def update_iptcdata(filepath, new_caption, new_keywords, new_datetime):
   """Updates the caption and keywords of an image file."""
   # Some cameras write into ImageDescription, so we wipe it out to not cause
   # conflicts with Caption-Abstract
-  command = u'exiftool -F -m -P -ImageDescription='
+  command = [_EXIFTOOL, '-F', '-P', '-ImageDescription=']
   tmp = None
   if not new_caption is None:
     tmpfd, tmp = tempfile.mkstemp(dir="/var/tmp")
@@ -108,16 +109,16 @@ def update_iptcdata(filepath, new_caption, new_keywords, new_datetime):
       new_caption = " "
     print >> file1, new_caption.encode("utf-8")
     file1.close()
-    command += ' "-Caption-Abstract<=%s"' % (tmp)
+    command.append('-Caption-Abstract<=%s' % (tmp))
   
   if new_datetime:
-    command += ' -DateTimeOriginal="%s"' % (
-      new_datetime.strftime("%Y:%m:%d %H:%M:%S"))
+    command.append('-DateTimeOriginal="%s"' % (
+      new_datetime.strftime("%Y:%m:%d %H:%M:%S")))
   if new_keywords:
     for keyword in new_keywords:
-      command += u' -keywords="%s"' % (keyword)
-  command += ' "%s"' % (filepath)
-  result = systemutils.execandcombine(command.encode("utf-8"))
+      command.append(u'-keywords=%s' % (keyword))
+  command.append(filepath)
+  result = systemutils.execandcombine(command)
   if tmp:
     os.remove(tmp)
   if result == "1 image files updated":
