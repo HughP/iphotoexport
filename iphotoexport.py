@@ -30,11 +30,12 @@ import tilutil.systemutils as sysutils
 
 # TODO: make this list configurable
 _IGNORE_LIST = ("pspbrwse.jbf", "thumbs.db", "desktop.ini", ".ds_store",
-                "ipod photo cache", "picasa.ini", ".picasa.ini", 
+                "ipod photo cache", "picasa.ini", ".picasa.ini",
+                ".picasa.ini.old", "picasa.ini.old",
                 "albumdata.xml", "albumdata2.xml", "pkginfo", "imovie data", 
                 "dir.data", "iphoto.ipspot", "iphotolock.data", "library.data", 
-                "library.iphoto", "library6.iphoto", "caches", ".ipspot_update",
-                ".picasaoriginals")
+                "library.iphoto", "library6.iphoto", "caches", ".bridgesort",
+                ".ipspot_update", ".picasaoriginals")
 
 def is_ignore(file_name):
   """returns True if the file name is in a list of names to ignore."""
