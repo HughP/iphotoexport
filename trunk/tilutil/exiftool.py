@@ -117,6 +117,7 @@ def update_iptcdata(filepath, new_caption, new_keywords, new_datetime):
   if new_keywords:
     for keyword in new_keywords:
       command.append(u'-keywords=%s' % (keyword))
+  command.append("-iptc:CodedCharacterSet=ESC % G");
   command.append(filepath)
   result = systemutils.execandcombine(command)
   if tmp:
