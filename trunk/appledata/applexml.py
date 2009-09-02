@@ -25,7 +25,11 @@ APPLE_BASE = 978307200 # 2001/1/1
 
 def getappletime(value):
   '''Converts a numeric Apple time stamp into a date and time'''
-  return datetime.datetime.fromtimestamp(APPLE_BASE + float(value))
+  try:
+    return datetime.datetime.fromtimestamp(APPLE_BASE + float(value))
+  except ValueError, e:
+    # bad timestamp in database, default to "now"
+    return datetime.datetime.now()
 
 class AppleXMLResolver(xml.sax.handler.EntityResolver): #IGNORE:R0903
   '''Helper to deal with XML entity resolving'''
