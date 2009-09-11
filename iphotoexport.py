@@ -31,12 +31,42 @@ import tilutil.systemutils as sysutils
 # TODO: make this list configurable
 _IGNORE_LIST = ("pspbrwse.jbf", "thumbs.db", "desktop.ini", ".ds_store",
                 "ipod photo cache", "picasa.ini", ".picasa.ini",
+                "feed.rss", "view online.url",
                 ".picasa.ini.old", "picasa.ini.old",
                 "albumdata.xml", "albumdata2.xml", "pkginfo", "imovie data", 
                 "dir.data", "iphoto.ipspot", "iphotolock.data", "library.data", 
                 "library.iphoto", "library6.iphoto", "caches", ".bridgesort",
                 ".ipspot_update", ".picasaoriginals")
 
+# ImageMagick "convert" tool
+_CONVERT_TOOL = "convert"
+
+def check_convert():
+  """Tests if ImageMagick convert tool is available."""
+  found_it = False
+  try:
+    output = sysutils.execandcombine([_CONVERT_TOOL, "-version" ])
+    if output.find("ImageMagick") >= 0:
+      found_it = True
+  except StandardError:
+    pass
+
+  if not found_it:
+    print >> sys.stderr, """Cannot execute "%s".
+    
+Make sure you have ImageMagick installed. You can download a copy
+from http://www.imagemagick.org/script/index.php
+""" % (_CONVERT_TOOL)
+    return False
+  return True
+
+    
+def es(value):
+  '''Helper to encode a string using the system encoding'''
+  if not value:
+    return ""
+  return value.encode(sys.getfilesystemencoding(), "replace")
+   
 def is_ignore(file_name):
   """returns True if the file name is in a list of names to ignore."""
   if file_name.startswith("._"):
@@ -95,10 +125,10 @@ def delete_album_file(album_file, albumdirectory, msg, options):
   if not album_file.startswith(albumdirectory):
     print >> sys.stderr, (
         "Internal error - attempting to delete file "
-        "that is not in album directory:\n    %s") % (album_file)
+        "that is not in album directory:\n    %s") % (es(album_file))
     return False
   if msg:
-    print "%s: %s" % (msg, album_file)
+    print "%s: %s" % (msg, es(album_file))
 
   if not options.delete:
     print "Invoke iphotoexport with the -d option to delete this file."
@@ -115,49 +145,61 @@ def delete_album_file(album_file, albumdirectory, msg, options):
       os.remove(album_file)
     return True
   except OSError, ex:
-    print >> sys.stderr, "Could not delete %s: %s" % (album_file, ex)
+    print >> sys.stderr, "Could not delete %s: %s" % (es(album_file), ex)
   return False
 
 
-def copy_or_link_file(source, target, options):
-  """copies or links a file."""
+def copy_or_link_file(source, target, options, is_original):
+  """copies, links, or converts an image file."""
   # looks at options.link and options.update
   try:
     mode = " (copy)"
-    if options.link:
+    if options.size and not is_original:
+      mode = " (convert)"
+    if options.link and not is_original:
       mode = " (link)"
     if os.path.exists(target):
       if not options.update:
-        print "Needs update: %s." % (target)
+        print "Needs update: %s." % (es(target))
         print "Use the -u option to update this file." 
         return
-      print "Updating: " + target + mode
+      print "Updating: " + es(target) + mode
       os.remove(target)
     else:
-      print "New file: " + target + mode
+      print "New file: " + es(target) + mode
     if options.link:
       os.link(source, target)
+    elif options.size:
+      result = sysutils.execandcombine([_CONVERT_TOOL, source, '-delete', '1--1',
+                                        '-quality', '75%', '-resize',
+                                        "%s>" % (options.size), target]);
+      if result:
+        print >> sys.stderr, "%s: %s" % (es(source), result)
     else:
       # 'cp' is about 4x faster than shutil.copy2() when I tested it a long
       # time ago, but it requires a subprocess
-      shutil.copy2(source, target)
-      #result = sysutils.execandcombine('cp -fp "%s" "%s"' % (source, target))
-      #if result:
-      #  print >> sys.stderr, "%s: %s" % (source, result)
+      # macostools.copy(source, target)
+      # shutil.copy2(source, target)
+      result = sysutils.execandcombine([ 'cp', '-fp', source, target ])
+      if result:
+        print >> sys.stderr, "%s: %s" % (es(source), result)
   except OSError, ose:
-    print >> sys.stderr, "%s: %s" % (source, ose)
+    print >> sys.stderr, "%s: %s" % (es(source), ose)
 
 
 class ExportFile(object):
   """Describes an exported image."""
 
-  def __init__(self, photo, export_directory, base_name):
+  def __init__(self, photo, export_directory, base_name, options):
     """Creates a new ExportFile object."""
     self.photo = photo
     self.export_directory = export_directory
+    if options.size:
+      extension = "jpg"
+    else:
+      extension = sysutils.getfileextension(photo.getimagepath())
     self.export_file = os.path.join(
-        export_directory, 
-        base_name + "." + sysutils.getfileextension(photo.getimagepath()))
+        export_directory, base_name + "." + extension)
     # location of "Original" file, if any
     self.original_export_file = os.path.join(
         export_directory, "Originals", base_name + "." +
@@ -200,7 +242,7 @@ class ExportFile(object):
           do_export = True
 
       if do_export:
-        copy_or_link_file(source_file, self.export_file, options)
+        copy_or_link_file(source_file, self.export_file, options, False)
 
       # if we copy, we update the IPTC data in the copied file
       if do_iptc and not options.link:
@@ -211,11 +253,11 @@ class ExportFile(object):
         if options.link:
           self.check_iptc_data(original_source_file)
         copy_or_link_file(original_source_file, self.original_export_file,
-                          options)
+                          options, True)
         if not options.link:
           self.check_iptc_data(self.original_export_file)
     except OSError, ose:
-      print >> sys.stderr, "Failed to export %s: %s" % (source_file, ose)
+      print >> sys.stderr, "Failed to export %s: %s" % (es(source_file), ose)
 
   def check_iptc_data(self, export_file):
     """Tests if a file has the proper keywords and caption in the meta data."""
@@ -231,7 +273,7 @@ class ExportFile(object):
         export_file)
     if not sysutils.equalscontent(file_caption, new_caption):
       print ('Updating IPTC for %s because it has Caption "%s" instead of '
-             '"%s".') % (export_file, file_caption, new_caption)
+             '"%s".') % (es(export_file), es(file_caption), es(new_caption))
     else:
       new_caption = None
 
@@ -241,14 +283,14 @@ class ExportFile(object):
         new_keywords.append(keyword)
     if not compare_keywords(new_keywords, file_keywords):
       print "Updating IPTC for %s because of keywords (%s instead of %s)" % (
-          export_file, ",".join(file_keywords), ",".join(new_keywords))
+          es(export_file), es(",".join(file_keywords)), es(",".join(new_keywords)))
     else:
       new_keywords = None
 
     new_date = None
     if date_time_original != self.photo.date:
       print "Updating IPTC for %s because of date (%s instead of %s)" % (
-          export_file, date_time_original, self.photo.date)
+          es(export_file), date_time_original, self.photo.date)
       new_date = self.photo.date
       
     if new_caption or new_keywords or new_date:
@@ -270,19 +312,20 @@ class ExportDirectory(object):
     self.albumdirectory = albumdirectory
     self.files = {}
 
-  def process_albums(self, images, export_movies, name_template):
+  def process_albums(self, images, options):
     """Works through an image folder tree, and builds data for exporting."""
     entries = 0
-    template = string.Template(name_template)
+    template = string.Template(options.nametemplate)
 
     if images is not None:
       for image in images:
-        if image.ismovie() and not export_movies:
+        if image.ismovie() and not options.movies:
           continue
         base_name = image.getcaption()
         album_basename = self.make_album_basename(base_name, entries + 1,
                                                   template)
-        picture_file = ExportFile(image, self.albumdirectory, album_basename)
+        picture_file = ExportFile(image, self.albumdirectory, album_basename,
+                                  options)
         self.files[album_basename] = picture_file
         entries += 1
 
@@ -400,14 +443,14 @@ class ExportLibrary(object):
       i += 1
 
   def process_albums(self, albums, album_types, folder_prefix, includes,
-                     excludes, export_movies, name_template, matched=False):
+                     excludes, options, matched=False):
     """Walks trough an iPhoto album tree, and discovers albums (directories)."""
     entries = 0
 
-    include_pattern = re.compile(includes)
+    include_pattern = re.compile(includes.decode(sys.getfilesystemencoding()))
     exclude_pattern = None
     if excludes:
-      exclude_pattern = re.compile(excludes)
+      exclude_pattern = re.compile(excludes.decode(sys.getfilesystemencoding()))
       
     # first, do the sub-albums
     for sub_album in albums:
@@ -423,8 +466,7 @@ class ExportLibrary(object):
           sub_matched = True
         self.process_albums(sub_album.albums, album_types,
                            folder_prefix + make_foldername(sub_name) + "/",
-                           includes, excludes, export_movies, name_template,
-                           sub_matched)
+                           includes, excludes, options, sub_matched)
         continue
       elif (sub_album.albumtype == "None" or
             not sub_album.albumtype in album_types):
@@ -438,7 +480,9 @@ class ExportLibrary(object):
       if exclude_pattern and exclude_pattern.match(sub_name):
         continue
 
-      folder_hint = sub_album.getfolderhint()
+      folder_hint = None
+      if options.folderhints:
+        folder_hint = sub_album.getfolderhint()
       prefix = folder_prefix
       if folder_hint is not None:
         prefix = prefix + make_foldername(folder_hint) + "/"
@@ -447,15 +491,13 @@ class ExportLibrary(object):
 
       # first, do the sub-albums
       if self.process_albums(sub_album.albums, album_types, folder_prefix,
-                            includes, excludes, export_movies, name_template,
-                            matched) > 0:
+                            includes, excludes, options, matched) > 0:
         entries += 1
 
       # now the album itself
       picture_directory = ExportDirectory(
           sub_name, sub_album, os.path.join(self.albumdirectory, sub_name))
-      if picture_directory.process_albums(sub_album.images, export_movies,
-                                          name_template) > 0:
+      if picture_directory.process_albums(sub_album.images, options) > 0:
         self.named_folders[sub_name] = picture_directory
         entries += 1
 
@@ -490,7 +532,7 @@ class ExportLibrary(object):
       album_file = os.path.join(directory, f)
       if os.path.isdir(album_file):
         if f == "iPod Photo Cache":
-          print "Skipping " + album_file
+          print "Skipping " + es(album_file)
           continue
         rel_path_file = os.path.join(rel_path, f)
         if album_directories.get(album_file):
@@ -505,6 +547,7 @@ class ExportLibrary(object):
         if is_ignore(f):
           continue
         delete_album_file(album_file, directory, "Obsolete", options)
+          
     return contains_albums
 
   def generate_files(self, options):
@@ -525,19 +568,16 @@ def export_iphoto(data, export_dir, excludes, exclude_folders, options):
   album = ExportLibrary(os.path.join(export_dir))
   if options.events is not None:
     album.process_albums(data.rolls, ["Event"], "", 
-                         options.events, excludes, options.movies, 
-                         options.nametemplate)
+                         options.events, excludes, options) 
 
   if options.albums is not None:
     # ignore: Selected Event Album, Special Roll, Special Month
     album.process_albums(data.masteralbum.albums, ["Regular", "Published"], "",
-                         options.albums, excludes, options.movies,
-                         options.nametemplate)
+                         options.albums, excludes, options)
 
   if options.smarts is not None:
     album.process_albums(data.masteralbum.albums, ["Smart"], "", 
-                         options.smarts, excludes, options.movies,
-                         options.nametemplate)
+                         options.smarts, excludes, options)
 
   print "Scanning existing files in export folder..."
   album.load_album(options, exclude_folders)
@@ -579,6 +619,8 @@ def main():
       a regular expression. Use -e . to export all events.""")
   parser.add_option("-f", "--faces", action="store_true",
                     help="Process faces information")
+  parser.add_option("--folderhints", dest="folderhints", action="store_true",
+                    help="Scan event and album descriptions for folder hints.")
   parser.add_option(
       "-k", "--iptc", action="store_const", const=1, dest="iptc",
       help="""Check the IPTC data of all new or updated files. Checks for 
@@ -590,18 +632,21 @@ def main():
       keywords and descriptions. Requires the program "exiftool" (see
       http://www.sno.phy.queensu.ca/~phil/exiftool/).""")
   parser.add_option(
-      "-l", "--link", action="store_true",
-      help="""Use links instead of copying files. Use with care, as changes made
-      to the exported files will affect the image that is stored in the iPhoto
-      library.""")
+    "-l", "--link", action="store_true",
+    help="""Use links instead of copying files. Use with care, as changes made
+    to the exported files will affect the image that is stored in the iPhoto
+    library.""")
   parser.add_option(
-      "-n", "--nametemplate", default="${caption}",
-      help="""Template for naming image files. Default: "${caption}".""")
+    "-n", "--nametemplate", default="${caption}",
+    help="""Template for naming image files. Default: "${caption}".""")
   parser.add_option("-o", "--originals", action="store_true", 
                     help="Export original files into Originals.")
   parser.add_option("--pictures", action="store_false", dest="movies",
                     default=True, 
                     help="Export pictures only (no movies).")
+  parser.add_option(
+    "--size", help="""Resize images to not exceed this width or height.
+    Use widthxheight format, like 640x480. Requires ImageMagick tool.""")
   parser.add_option(
       "-s", "--smarts", 
       help="""Export matching smart albums. The argument 
@@ -626,6 +671,15 @@ def main():
   if not options.albums and not options.events and not options.smarts:
     parser.error("Need to specify at least one event, album, or smart album.")
   if options.iptc > 0 and not exiftool.check_exif_tool():
+    print >> sys.stderr, "Exiftool is needed for the --itpc or --iptcall options."
+    return 1
+
+  if options.size and options.link:
+    parser.error("Cannot use --size and --link together.")
+    
+  if options.size and not check_convert():
+    print >> sys.stderr, "ImageMagick is needed for the --size option."
+    
     return 1
   
   album_xml_file = iphotodata.get_album_xmlfile(library_dir)

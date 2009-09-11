@@ -34,8 +34,8 @@ _EXIFTOOL = "/usr/bin/exiftool"
 
 def check_exif_tool():
   """Tests if a compatible version of exiftool is available."""
-  output = systemutils.execandcombine((_EXIFTOOL, "-ver"))
   try:
+    output = systemutils.execandcombine((_EXIFTOOL, "-ver"))
     version = float(output)
     if version < 7.47:
       print >> sys.stderr, "You have version " + str(version) + " of exiftool."
@@ -45,12 +45,12 @@ from http://www.sno.phy.queensu.ca/~phil/exiftool/. iphoto_export wants to use
 the new -X option to read IPTC data in XML format."""
       return False
     return True
-  except ValueError:
-    print >> sys.stderr, """Cannot execute "exiftool".
+  except StandardError:
+    print >> sys.stderr, """Cannot execute "%s".
 
 Make sure you have exiftool installed as /usr/bin/exiftool. You can download a
 copy from http://www.sno.phy.queensu.ca/~phil/exiftool/.
-"""
+""" % (_EXIFTOOL)
   return False
 
 
