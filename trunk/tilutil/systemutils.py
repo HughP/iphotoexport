@@ -21,6 +21,8 @@ Created on May 29, 2009
 import filecmp
 import os
 import subprocess
+import sys
+import unicodedata
 
 def execandcombine(command):
   """execute a shell command, and return all output in a single string."""
@@ -55,6 +57,22 @@ def equalscontent(string1, string2):
 
 # FileUtil --------------------------------------------------------------------
 
+def os_listdir_unicode(folder):
+  """Returns os.listdir with proper Unicode handling, and sorted"""
+  # passing a unicode directory name gives back unicode filenames, passing a
+  # str directory name gives back str filenames. On MacOS, filenames come back
+  # in Unicode Normalization Form D, so force to form C.
+  file_list = [ unicodedata.normalize("NFC", nfd) 
+              for nfd in os.listdir(unicode(folder)) ]
+  file_list.sort()
+  return file_list
+
+
+def fsenc(value):
+  '''Helper to encode a string using the system encoding'''
+  if not value:
+    return ""
+  return value.encode(sys.getfilesystemencoding(), "replace")
 
 def getfilebasename(file_path):
   """returns the name of a file, without the extension. "/a/b/c.txt" -> "c"."""
@@ -72,3 +90,5 @@ def getfileextension(file_path):
 def issamefile(file1, file2):
   """Tests if the two files have the same contents."""
   return filecmp.cmp(file1, file2, False)
+
+

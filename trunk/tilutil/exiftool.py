@@ -24,9 +24,8 @@ import sys
 import tempfile
 import time
 
-import xml.dom
-import xml.dom.minidom
-import xml.sax.handler
+from xml.dom import minidom
+from xml import parsers
 
 import systemutils
 
@@ -55,17 +54,24 @@ copy from http://www.sno.phy.queensu.ca/~phil/exiftool/.
 
 
 def get_iptc_data(image_file):
-  """get caption and keywords all in one operation."""
+  """get caption, keywords, datetime, rating, and GPS info all in one 
+     operation."""
   output = systemutils.execandcombine(
-      (_EXIFTOOL, "-X", "-m", "-q", "-q", "-Keywords", "-Caption-Abstract",
-       "-DateTimeOriginal", "%s" % (image_file.encode('utf8'))))
+      (_EXIFTOOL, "-X", "-m", "-q", "-q", '-c', '%.6f', "-Keywords", 
+       "-Caption-Abstract", "-DateTimeOriginal", "-Rating", "-GPSLatitude", 
+       "-GPSLongitude", "%s" % (image_file.encode('utf8'))))
 
   keywords = []
   caption = None
   date_time_original = None
+  rating = 0
+  gps = None
   if output:
     try:
-      xml_data = xml.dom.minidom.parseString(output)
+      gps_latitude = None
+      gps_longitude = None
+      xml_data = minidom.parseString(output)
+  
       for xml_desc in xml_data.getElementsByTagName("rdf:Description"):
         for xml_keywords in xml_desc.getElementsByTagName("IPTC:Keywords"):
           if (xml_keywords.firstChild.nodeValue and
@@ -87,14 +93,32 @@ def get_iptc_data(image_file):
                                                  date_time_original.tm_hour,
                                                  date_time_original.tm_min,
                                                  date_time_original.tm_sec)
-    except xml.parsers.expat.ExpatError, ex:
+        for xml_rating in xml_data.getElementsByTagName("XMP-xmp:Rating"):
+          rating = int(xml_rating.firstChild.nodeValue)
+        for xml_element in xml_data.getElementsByTagName(
+            "Composite:GPSLatitude"):
+          gps_latitude = xml_element.firstChild.nodeValue
+        for xml_element in xml_data.getElementsByTagName(
+            "Composite:GPSLongitude"):
+          gps_longitude = xml_element.firstChild.nodeValue
+      xml_data.unlink()
+      if gps_latitude and gps_longitude:
+        latitude = float(gps_latitude[0:-2])
+        if gps_latitude.endswith(" S"):
+          latitude = -latitude
+        longitude = float(gps_longitude[0:-2])
+        if gps_longitude.endswith(" W"):
+          longitude = -longitude
+        gps = (latitude, longitude)
+    except parsers.expat.ExpatError, ex:
       print >> sys.stderr, "Could not parse exiftool output %s: %s" % (
           output, ex)
 
-  return (keywords, caption, date_time_original)
+  return (keywords, caption, date_time_original, rating, gps)
 
 
-def update_iptcdata(filepath, new_caption, new_keywords, new_datetime): 
+def update_iptcdata(filepath, new_caption, new_keywords, new_datetime, 
+                    new_rating, new_gps): 
   """Updates the caption and keywords of an image file."""
   # Some cameras write into ImageDescription, so we wipe it out to not cause
   # conflicts with Caption-Abstract
@@ -117,7 +141,24 @@ def update_iptcdata(filepath, new_caption, new_keywords, new_datetime):
   if new_keywords:
     for keyword in new_keywords:
       command.append(u'-keywords=%s' % (keyword))
-  command.append("-iptc:CodedCharacterSet=ESC % G");
+  if new_rating:
+    command.append('-Rating=%d' % (new_rating))
+  if new_gps:
+    command.append('-c')
+    command.append('%.6f')
+    latitude = float(new_gps[0])
+    command.append('-GPSLatitude="%f"' % (abs(latitude)))
+    if latitude >= 0.0:
+      command.append('-GPSLatitudeRef=N')
+    else:
+      command.append('-GPSLatitudeRef=S')
+    longitude = float(new_gps[1])
+    command.append('-GPSLongitude="%f"' % (abs(longitude)))
+    if longitude >= 0.0:
+      command.append('-GPSLongitudeRef=E')
+    else:
+      command.append('-GPSLongitudeRef=W')
+  command.append("-iptc:CodedCharacterSet=ESC % G")
   command.append(filepath)
   result = systemutils.execandcombine(command)
   if tmp:

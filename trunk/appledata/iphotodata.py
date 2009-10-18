@@ -40,8 +40,15 @@ None - should not really happen
 #   limitations under the License.
 
 import os
-import sqlite3
+import sys
 
+try:
+  # Not all systems have sqlite3 available
+  import sqlite3
+except ImportError, e:
+  # save the error, so we can raise it later if we actually need the module
+  sqlite_error = e
+  
 import appledata.applexml as applexml
 import tilutil.systemutils as sysutils
 
@@ -104,6 +111,8 @@ class IPhotoData(object):
       other_image_list.append(image)
 
     self.face_names = {}
+    self.place_names = {}
+    self.user_places = {}
 
   def _getapplicationversion(self):
     return self._data.get("Application Version")
@@ -199,6 +208,8 @@ class IPhotoData(object):
 
   def readfaces(self, library_dir):
     """Reads faces information from face.db."""
+    if sqlite_error:
+      raise sqlite_error
     connection = sqlite3.connect(os.path.join(library_dir, "face.db"))
     cursor = connection.cursor()
     cursor.execute("SELECT face_key, name FROM face_name WHERE name != ''")
@@ -219,6 +230,61 @@ class IPhotoData(object):
     cursor.close()
     connection.close()
     
+  def _checkplace(self, image, place_key):
+    if place_key > 0:
+      place_name = self.place_names.get(place_key)
+      if place_name:
+        image.placenames.append(place_name)
+      else:
+        print >> sys.stderr, "No place name found for %d" % (place_key)
+      
+  def readplaces(self, library_dir):
+    """Reads places information from iPhotoMain.db"""
+    if sqlite_error:
+      raise sqlite_error
+    connection = sqlite3.connect(os.path.join(library_dir, "iPhotoMain.db"))
+    cursor = connection.cursor()
+    cursor.execute("SELECT primaryKey, name FROM sqUserPlace")
+    for row in cursor:
+      place_key, name = row
+      self.user_places[place_key] = name
+      
+    cursor.execute(('SELECT n.place, n.string FROM SqPlace p, SqPlaceName n '
+                    'WHERE p.defaultName = n.primaryKey'))
+    for row in cursor:
+      place_key, name = row
+      self.place_names[place_key] = name
+
+    cursor.execute("SELECT primaryKey, gpsLatitude, gpsLongitude, " +
+                   "namedPlace, ocean, country, province, county, " +
+                   "city, neighborhood " +
+                   "FROM SqPhotoInfo " +
+                   "WHERE isVisible == 1 AND " +
+                   "(manualLocation == 1 OR namedPlace > 0)")
+    for row in cursor:
+      (image_key, gps_latitude, gps_longitude, place_key, ocean, country, 
+       province, county, city, neighborhood) = row
+      name = self.user_places.get(place_key)
+      image = self.images_by_id.get(str(image_key))
+      if not image:
+        print >> sys.stderr, "Couldn't find image for %d" % (image_key)
+        continue
+      if name:
+        image.placenames.append(name)
+      self._checkplace(image, ocean)
+      self._checkplace(image, country)
+      self._checkplace(image, province)
+      self._checkplace(image, county)
+      self._checkplace(image, city)
+      self._checkplace(image, neighborhood)
+        
+      if abs(gps_latitude) <= 90 and abs(gps_longitude) <= 180:
+        image.gps = (float("%.6f" % (gps_latitude)), 
+                     float("%.6f" % (gps_longitude)))
+
+    cursor.close()
+    connection.close()
+    
 class IPhotoImage(object):
   """Describes an image in the iPhoto database."""
 
@@ -228,6 +294,7 @@ class IPhotoImage(object):
     self.comment = data.get("Comment")
     self.date = applexml.getappletime(data.get("DateAsTimerInterval"))
     self.image_path = data.get("ImagePath")
+    self.rating = int(data.get("Rating"))
 
     self.keywords = []
     keyword_list = data.get("Keywords")
@@ -240,7 +307,9 @@ class IPhotoImage(object):
 
     self.albums = []  # list of albums that this image belongs to
     self.faces = []
-
+    self.placenames = []
+    self.gps = None
+    
   def getimagepath(self):
     """Returns the full path to this image.."""
     return self.image_path
@@ -253,10 +322,6 @@ class IPhotoImage(object):
   def getbasename(self):
     """Returns the base name of the main image file."""
     return sysutils.getfilebasename(self.image_path)
-
-##     public Double getDate() {
-##         return data.get("DateAsTimerInterval")
-##     }
 
   def getcaption(self):
     """gets the caption (title) of the image."""
@@ -284,14 +349,10 @@ class IPhotoImage(object):
     """Tests if the image is hidden (using keyword "Hidden")"""
     return "Hidden" in self.keywords
 
-##     public Date getDate() {
-##         return date
-##     }
-
   def _getthumbpath(self):
     return self.data.get("ThumbPath")
   thumbpath = property(_getthumbpath, doc="Path to thumbnail image")
-
+  
 
 class IPhotoContainer(object):
   """Base class for IPhotoAlbum and IPhotoRoll."""
@@ -334,6 +395,15 @@ class IPhotoContainer(object):
         if comment.startswith("@"):
           return comment[1:]
     return None
+  
+  def getcommentwithouthints(self):
+    """Gets the image comments, with any folder hint lines removed"""
+    result = []
+    if self.comment:
+      for line in self.comment.split("\n"):
+        if not line.startswith("@"):
+          result.append(line)
+    return "\n".join(result)
   
   def addalbum(self, album):
     """adds an album to this container."""
@@ -402,7 +472,7 @@ def get_album_xmlfile(library_dir):
       "location.") % (library_dir)
  
 
-def get_iphoto_data(library_dir, album_xml_file, do_faces):
+def get_iphoto_data(library_dir, album_xml_file, do_faces, do_places):
   """reads the iPhoto database and converts it into an iPhotoData object."""
   print "Reading iPhoto database..."
   album_xml = applexml.read_applexml(album_xml_file)
@@ -415,8 +485,18 @@ def get_iphoto_data(library_dir, album_xml_file, do_faces):
     raise ValueError, "iPhoto version %s not supported" % (
         data.applicationVersion)
 
-  if do_faces and data.applicationVersion.startswith("8."):
-    print "Reading faces..."
-    data.readfaces(library_dir)
+  if do_faces:
+    if data.applicationVersion.startswith("8."):
+      print "Reading faces..."
+      data.readfaces(library_dir)
+    else:
+      print >> sys.stderr, "No face information in this iPhoto library."
+      
+  if do_places:
+    if data.applicationVersion.startswith("8."):
+      print "Reading places..."
+      data.readplaces(library_dir)
+    else:
+      print >> sys.stderr, "No place information in this iPhoto library."
 
   return data

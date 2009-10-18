@@ -17,7 +17,6 @@
 
 import os
 import re
-import shutil
 import string
 import sys
 import unicodedata
@@ -26,50 +25,25 @@ from optparse import OptionParser
 
 import appledata.iphotodata as iphotodata
 import tilutil.exiftool as exiftool
-import tilutil.systemutils as sysutils
+import tilutil.systemutils as su
+import tilutil.imageutils as imageutils
+import picasautil
+
+# Maximum diff in file size to be not considered a change (to allow for
+# meta data updates for example)
+_MAX_FILE_DIFF = 10000
 
 # TODO: make this list configurable
-_IGNORE_LIST = ("pspbrwse.jbf", "thumbs.db", "desktop.ini", ".ds_store",
-                "ipod photo cache", "picasa.ini", ".picasa.ini",
+_IGNORE_LIST = ("pspbrwse.jbf", "thumbs.db", "desktop.ini",
+                "ipod photo cache", "picasa.ini", 
                 "feed.rss", "view online.url",
-                ".picasa.ini.old", "picasa.ini.old",
                 "albumdata.xml", "albumdata2.xml", "pkginfo", "imovie data", 
                 "dir.data", "iphoto.ipspot", "iphotolock.data", "library.data", 
-                "library.iphoto", "library6.iphoto", "caches", ".bridgesort",
-                ".ipspot_update", ".picasaoriginals")
+                "library.iphoto", "library6.iphoto", "caches")
 
-# ImageMagick "convert" tool
-_CONVERT_TOOL = "convert"
-
-def check_convert():
-  """Tests if ImageMagick convert tool is available."""
-  found_it = False
-  try:
-    output = sysutils.execandcombine([_CONVERT_TOOL, "-version" ])
-    if output.find("ImageMagick") >= 0:
-      found_it = True
-  except StandardError:
-    pass
-
-  if not found_it:
-    print >> sys.stderr, """Cannot execute "%s".
-    
-Make sure you have ImageMagick installed. You can download a copy
-from http://www.imagemagick.org/script/index.php
-""" % (_CONVERT_TOOL)
-    return False
-  return True
-
-    
-def es(value):
-  '''Helper to encode a string using the system encoding'''
-  if not value:
-    return ""
-  return value.encode(sys.getfilesystemencoding(), "replace")
-   
 def is_ignore(file_name):
   """returns True if the file name is in a list of names to ignore."""
-  if file_name.startswith("._"):
+  if file_name.startswith("."):
     return True
   name = file_name.lower()
   return name in _IGNORE_LIST
@@ -94,7 +68,7 @@ def album_util_make_filename(name):
   """Returns a valid file name by replacing problematic characters."""
   result = u""
   for c in name:
-    if c.isalpha() or c.isdigit() or c.isspace():
+    if c.isalnum() or c.isspace():
       result += c
     elif c == ":":
       result += '.'
@@ -125,10 +99,10 @@ def delete_album_file(album_file, albumdirectory, msg, options):
   if not album_file.startswith(albumdirectory):
     print >> sys.stderr, (
         "Internal error - attempting to delete file "
-        "that is not in album directory:\n    %s") % (es(album_file))
+        "that is not in album directory:\n    %s") % (su.fsenc(album_file))
     return False
   if msg:
-    print "%s: %s" % (msg, es(album_file))
+    print "%s: %s" % (msg, su.fsenc(album_file))
 
   if not options.delete:
     print "Invoke iphotoexport with the -d option to delete this file."
@@ -145,46 +119,46 @@ def delete_album_file(album_file, albumdirectory, msg, options):
       os.remove(album_file)
     return True
   except OSError, ex:
-    print >> sys.stderr, "Could not delete %s: %s" % (es(album_file), ex)
+    print >> sys.stderr, "Could not delete %s: %s" % (su.fsenc(album_file), ex)
   return False
 
 
-def copy_or_link_file(source, target, options, is_original):
+def copy_or_link_file(source, target, options):
   """copies, links, or converts an image file."""
   # looks at options.link and options.update
   try:
-    mode = " (copy)"
-    if options.size and not is_original:
+    if options.size:
       mode = " (convert)"
-    if options.link and not is_original:
+    elif options.link:
       mode = " (link)"
+    else:
+      mode = " (copy)"
     if os.path.exists(target):
       if not options.update:
-        print "Needs update: %s." % (es(target))
+        print "Needs update: %s." % (su.fsenc(target))
         print "Use the -u option to update this file." 
         return
-      print "Updating: " + es(target) + mode
+      print "Updating: " + su.fsenc(target) + mode
       os.remove(target)
     else:
-      print "New file: " + es(target) + mode
+      print "New file: " + su.fsenc(target) + mode
     if options.link:
       os.link(source, target)
     elif options.size:
-      result = sysutils.execandcombine([_CONVERT_TOOL, source, '-delete', '1--1',
-                                        '-quality', '75%', '-resize',
-                                        "%s>" % (options.size), target]);
+      result = su.execandcombine([imageutils.CONVERT_TOOL, source, '-delete', 
+                                 '1--1', '-quality', '75%', '-resize',
+                                 "%s>" % (options.size), target])
       if result:
-        print >> sys.stderr, "%s: %s" % (es(source), result)
+        print >> sys.stderr, "%s: %s" % (su.fsenc(source), result)
     else:
       # 'cp' is about 4x faster than shutil.copy2() when I tested it a long
       # time ago, but it requires a subprocess
-      # macostools.copy(source, target)
       # shutil.copy2(source, target)
-      result = sysutils.execandcombine([ 'cp', '-fp', source, target ])
+      result = su.execandcombine([ 'cp', '-fp', source, target ])
       if result:
-        print >> sys.stderr, "%s: %s" % (es(source), result)
+        print >> sys.stderr, "%s: %s" % (su.fsenc(source), result)
   except OSError, ose:
-    print >> sys.stderr, "%s: %s" % (es(source), ose)
+    print >> sys.stderr, "%s: %s" % (su.fsenc(source), ose)
 
 
 class ExportFile(object):
@@ -197,13 +171,18 @@ class ExportFile(object):
     if options.size:
       extension = "jpg"
     else:
-      extension = sysutils.getfileextension(photo.getimagepath())
+      extension = su.getfileextension(photo.getimagepath())
     self.export_file = os.path.join(
         export_directory, base_name + "." + extension)
     # location of "Original" file, if any
+    originals_folder = "Originals"
+    if options.picasa:
+      if (os.path.exists(os.path.join(export_directory, ".picasaoriginals")) or
+          not os.path.exists(os.path.join(export_directory, "Originals"))):
+        originals_folder = ".picasaoriginals"
     self.original_export_file = os.path.join(
-        export_directory, "Originals", base_name + "." +
-        sysutils.getfileextension(photo.getimagepath()))
+        export_directory, originals_folder, base_name + "." +
+        su.getfileextension(photo.getimagepath()))
 
   def get_photo(self):
     """Gets the associated iPhotoImage."""
@@ -220,6 +199,17 @@ class ExportFile(object):
       if os.path.exists(self.export_file):
         if os.path.getmtime(self.export_file) < os.path.getmtime(source_file):
           do_export = True
+        else:
+          if not options.size:
+            # With creative renaming in iPhoto it is possible to get stale 
+            # files if titles get swapped between images. Double check the size,
+            # allowing for some difference for meta data changes made in the 
+            # exported copy
+            source_size = os.path.getsize(source_file)
+            export_size = os.path.getsize(self.export_file)
+            diff = abs(source_size - export_size)
+            if diff > _MAX_FILE_DIFF:
+              do_export = True
       else:
         do_export = True
 
@@ -242,7 +232,7 @@ class ExportFile(object):
           do_export = True
 
       if do_export:
-        copy_or_link_file(source_file, self.export_file, options, False)
+        copy_or_link_file(source_file, self.export_file, options)
 
       # if we copy, we update the IPTC data in the copied file
       if do_iptc and not options.link:
@@ -253,15 +243,16 @@ class ExportFile(object):
         if options.link:
           self.check_iptc_data(original_source_file)
         copy_or_link_file(original_source_file, self.original_export_file,
-                          options, True)
+                          options)
         if not options.link:
           self.check_iptc_data(self.original_export_file)
     except OSError, ose:
-      print >> sys.stderr, "Failed to export %s: %s" % (es(source_file), ose)
+      print >> sys.stderr, "Failed to export %s: %s" % (su.fsenc(source_file), 
+                                                        ose)
 
   def check_iptc_data(self, export_file):
     """Tests if a file has the proper keywords and caption in the meta data."""
-    if not sysutils.getfileextension(export_file) in ("jpg", "tif", "png"):
+    if not su.getfileextension(export_file) in ("jpg", "tif", "png"):
       return False
 
     new_caption = self.photo.comment
@@ -269,11 +260,12 @@ class ExportFile(object):
       new_caption = ""
     else:
       new_caption = new_caption.strip()
-    file_keywords, file_caption, date_time_original = exiftool.get_iptc_data(
-        export_file)
-    if not sysutils.equalscontent(file_caption, new_caption):
+    (file_keywords, file_caption, date_time_original, rating,
+      gps) = exiftool.get_iptc_data(export_file)
+    if not su.equalscontent(file_caption, new_caption):
       print ('Updating IPTC for %s because it has Caption "%s" instead of '
-             '"%s".') % (es(export_file), es(file_caption), es(new_caption))
+             '"%s".') % (su.fsenc(export_file), su.fsenc(file_caption),
+                         su.fsenc(new_caption))
     else:
       new_caption = None
 
@@ -281,21 +273,43 @@ class ExportFile(object):
     for keyword in self.photo.getfaces():
       if not keyword in new_keywords:
         new_keywords.append(keyword)
+    for place_name in self.photo.placenames:
+      if not place_name in new_keywords:
+        new_keywords.append(place_name)
     if not compare_keywords(new_keywords, file_keywords):
       print "Updating IPTC for %s because of keywords (%s instead of %s)" % (
-          es(export_file), es(",".join(file_keywords)), es(",".join(new_keywords)))
+          su.fsenc(export_file), su.fsenc(",".join(file_keywords)), 
+          su.fsenc(",".join(new_keywords)))
     else:
       new_keywords = None
 
     new_date = None
     if date_time_original != self.photo.date:
       print "Updating IPTC for %s because of date (%s instead of %s)" % (
-          es(export_file), date_time_original, self.photo.date)
+          su.fsenc(export_file), date_time_original, self.photo.date)
       new_date = self.photo.date
       
-    if new_caption or new_keywords or new_date:
+    new_rating = None
+    if rating != self.photo.rating:
+      print "Updating IPTC for %s because of rating (%d instead of %d)" % (
+          su.fsenc(export_file), rating, self.photo.rating)
+      new_rating = self.photo.rating
+    
+    new_gps = None
+    if self.photo.gps:
+      if not gps or self.photo.gps[0] != gps[0] or self.photo.gps[1] != gps[1]:
+        if gps:
+          old_gps = gps
+        else:
+          old_gps = ("", "")
+        print "Updating IPTC for %s because of GPS (%s, %s) vs (%s, %s)" % (
+          su.fsenc(export_file), old_gps[0], old_gps[1], 
+          self.photo.gps[0], self.photo.gps[1])
+        new_gps = self.photo.gps
+        
+    if new_caption or new_keywords or new_date or new_gps or new_rating:
       exiftool.update_iptcdata(export_file, new_caption, new_keywords, 
-                               new_date)
+                               new_date, new_rating, new_gps)
       return True
     return False
 
@@ -322,11 +336,11 @@ class ExportDirectory(object):
         if image.ismovie() and not options.movies:
           continue
         base_name = image.getcaption()
-        album_basename = self.make_album_basename(base_name, entries + 1,
+        image_basename = self.make_album_basename(base_name, entries + 1,
                                                   template)
-        picture_file = ExportFile(image, self.albumdirectory, album_basename,
+        picture_file = ExportFile(image, self.albumdirectory, image_basename,
                                   options)
-        self.files[album_basename] = picture_file
+        self.files[image_basename] = picture_file
         entries += 1
 
     return entries
@@ -368,7 +382,8 @@ class ExportDirectory(object):
       album_file = unicodedata.normalize("NFC", 
                                          os.path.join(self.albumdirectory, f))
       if os.path.isdir(album_file):
-        if f == "Originals" and options.originals:
+        if (options.originals and
+            (f == "Originals" or (options.picasa and f == ".picasaoriginals"))):
           self.scan_originals(album_file, options)
           continue
         else:
@@ -376,8 +391,7 @@ class ExportDirectory(object):
                             "Obsolete export directory", options)
           continue
 
-      base_name = unicodedata.normalize("NFC", 
-                                        sysutils.getfilebasename(album_file))
+      base_name = unicodedata.normalize("NFC", su.getfilebasename(album_file))
       master_file = self.files.get(base_name)
 
       # everything else must have a master, or will have to go
@@ -403,7 +417,7 @@ class ExportDirectory(object):
         continue
 
       base_name = unicodedata.normalize("NFC", 
-                                        sysutils.getfilebasename(originalfile))
+                                        su.getfilebasename(originalfile))
       master_file = self.files.get(base_name)
 
       # everything else must have a master, or will have to go
@@ -421,7 +435,16 @@ class ExportDirectory(object):
     sorted_files.sort()
     for f in sorted_files:
       self.files[f].generate(options)
-
+    if options.picasa:
+      iphoto_description = self.iphoto_container.getcommentwithouthints()
+      picasa_data = picasautil.get_picasa_folder_data(self.albumdirectory)
+      picasa_description = picasautil.get_picasa_data_value(picasa_data,
+                             "Picasa", "description")
+      if not su.equalscontent(picasa_description, iphoto_description):
+        print "%s: folder/event descriptions don't match:" % (
+          self.albumdirectory)
+        print "  Picasa: %s" % (picasa_description)
+        print "  iPhoto: %s" % (iphoto_description.strip())
 
 class ExportLibrary(object):
   """The root of the export tree."""
@@ -523,16 +546,11 @@ class ExportLibrary(object):
     if os.path.split(directory)[1] in exclude_folders:
       return True
     contains_albums = False
-    # passing a unicode directory name gives back unicode filenames, passing a
-    # str directory name gives back str filenames. On MacOS, filenames come back
-    # in Unicode Normalization Form D, so force to form C.
-    file_list = [ unicodedata.normalize("NFC", nfd) 
-                 for nfd in os.listdir(unicode(directory)) ]
-    for f in file_list:
+    for f in su.os_listdir_unicode(directory):
       album_file = os.path.join(directory, f)
       if os.path.isdir(album_file):
         if f == "iPod Photo Cache":
-          print "Skipping " + es(album_file)
+          print "Skipping " + su.fsenc(album_file)
           continue
         rel_path_file = os.path.join(rel_path, f)
         if album_directories.get(album_file):
@@ -641,9 +659,14 @@ def main():
     help="""Template for naming image files. Default: "${caption}".""")
   parser.add_option("-o", "--originals", action="store_true", 
                     help="Export original files into Originals.")
+  parser.add_option(
+    "--picasa", action="store_true",
+    help="Store originals in .picasaoriginals, check folder descriptions")
   parser.add_option("--pictures", action="store_false", dest="movies",
                     default=True, 
                     help="Export pictures only (no movies).")
+  parser.add_option("--places", action="store_true",
+                    help="Process places information")
   parser.add_option(
     "--size", help="""Resize images to not exceed this width or height.
     Use widthxheight format, like 640x480. Requires ImageMagick tool.""")
@@ -671,19 +694,21 @@ def main():
   if not options.albums and not options.events and not options.smarts:
     parser.error("Need to specify at least one event, album, or smart album.")
   if options.iptc > 0 and not exiftool.check_exif_tool():
-    print >> sys.stderr, "Exiftool is needed for the --itpc or --iptcall options."
+    print >> sys.stderr, ("Exiftool is needed for the --itpc or --iptcall " +
+      "options.")
     return 1
 
   if options.size and options.link:
     parser.error("Cannot use --size and --link together.")
     
-  if options.size and not check_convert():
+  if options.size and not imageutils.check_convert():
     print >> sys.stderr, "ImageMagick is needed for the --size option."
     
     return 1
   
   album_xml_file = iphotodata.get_album_xmlfile(library_dir)
-  data = iphotodata.get_iphoto_data(library_dir, album_xml_file, options.faces)
+  data = iphotodata.get_iphoto_data(library_dir, album_xml_file, options.faces,
+                                    options.places)
   exclude_folders = []
   if options.excludefolders:
     exclude_folders = options.excludefolders.split(",")
