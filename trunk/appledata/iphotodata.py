@@ -42,10 +42,10 @@ None - should not really happen
 import os
 import sys
 
+sqlite_error = None
 try:
   # Not all systems have sqlite3 available
   import sqlite3
-  sqlite_error = None
 except ImportError, e:
   # save the error, so we can raise it later if we actually need the module
   sqlite_error = e
