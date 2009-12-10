@@ -90,6 +90,7 @@ def check_face_keywords(path, faces):
   needs_update = False
   for face in faces:
     if not face in file_keywords:
+      print su.fsenc(path) + " is missing " + face
       file_keywords.append(face)
       needs_update = True
       
