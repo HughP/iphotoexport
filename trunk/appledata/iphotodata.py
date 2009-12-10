@@ -42,13 +42,13 @@ None - should not really happen
 import os
 import sys
 
-sqlite_error = None
 try:
   # Not all systems have sqlite3 available
   import sqlite3
+  _SQLITE_ERROR = ""
 except ImportError, e:
   # save the error, so we can raise it later if we actually need the module
-  sqlite_error = e
+  _SQLITE_ERROR = e
   
 import appledata.applexml as applexml
 import tilutil.systemutils as sysutils
@@ -209,8 +209,8 @@ class IPhotoData(object):
 
   def readfaces(self, library_dir):
     """Reads faces information from face.db."""
-    if sqlite_error:
-      raise sqlite_error
+    if _SQLITE_ERROR:
+      raise _SQLITE_ERROR
     connection = sqlite3.connect(os.path.join(library_dir, "face.db"))
     cursor = connection.cursor()
     cursor.execute("SELECT face_key, name FROM face_name WHERE name != ''")
@@ -241,8 +241,8 @@ class IPhotoData(object):
       
   def readplaces(self, library_dir):
     """Reads places information from iPhotoMain.db"""
-    if sqlite_error:
-      raise sqlite_error
+    if _SQLITE_ERROR:
+      raise _SQLITE_ERROR
     connection = sqlite3.connect(os.path.join(library_dir, "iPhotoMain.db"))
     cursor = connection.cursor()
     cursor.execute("SELECT primaryKey, name FROM sqUserPlace")
@@ -268,7 +268,7 @@ class IPhotoData(object):
       name = self.user_places.get(place_key)
       image = self.images_by_id.get(str(image_key))
       if not image:
-        print >> sys.stderr, "Couldn't find image for %d" % (image_key)
+        print >> sys.stderr, "Places: couldn't find image for %d" % (image_key)
         continue
       if name:
         image.placenames.append(name)

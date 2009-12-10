@@ -15,6 +15,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
+import macostools
 import os
 import re
 import string
@@ -31,7 +32,7 @@ import picasautil
 
 # Maximum diff in file size to be not considered a change (to allow for
 # meta data updates for example)
-_MAX_FILE_DIFF = 10000
+_MAX_FILE_DIFF = 30000
 
 # TODO: make this list configurable
 _IGNORE_LIST = ("pspbrwse.jbf", "thumbs.db", "desktop.ini",
@@ -44,6 +45,8 @@ _IGNORE_LIST = ("pspbrwse.jbf", "thumbs.db", "desktop.ini",
 def is_ignore(file_name):
   """returns True if the file name is in a list of names to ignore."""
   if file_name.startswith("."):
+    if file_name == ".picasaoriginals":
+      return False
     return True
   name = file_name.lower()
   return name in _IGNORE_LIST
@@ -151,12 +154,7 @@ def copy_or_link_file(source, target, options):
       if result:
         print >> sys.stderr, "%s: %s" % (su.fsenc(source), result)
     else:
-      # 'cp' is about 4x faster than shutil.copy2() when I tested it a long
-      # time ago, but it requires a subprocess
-      # shutil.copy2(source, target)
-      result = su.execandcombine([ 'cp', '-fp', source, target ])
-      if result:
-        print >> sys.stderr, "%s: %s" % (su.fsenc(source), result)
+      macostools.copy(source, target)
   except OSError, ose:
     print >> sys.stderr, "%s: %s" % (su.fsenc(source), ose)
 
@@ -198,6 +196,8 @@ class ExportFile(object):
     try:
       if os.path.exists(self.export_file):
         if os.path.getmtime(self.export_file) < os.path.getmtime(source_file):
+          # print self.export_file + ": " + str(os.path.getmtime(self.export_file))
+          # print source_file + ": " + str(os.path.getmtime(source_file))
           do_export = True
         else:
           if not options.size:
@@ -209,9 +209,12 @@ class ExportFile(object):
             export_size = os.path.getsize(self.export_file)
             diff = abs(source_size - export_size)
             if diff > _MAX_FILE_DIFF:
+              # print self.export_file + ": " + str(export_size)
+              # print source_file + ": " + str(source_size)
               do_export = True
       else:
         do_export = True
+        # print self.export_file + ": missing"
 
       if options.originals and self.photo.originalpath is not None:
         export_dir = os.path.split(self.original_export_file)[0]
@@ -444,7 +447,7 @@ class ExportDirectory(object):
         print "%s: folder/event descriptions don't match:" % (
           self.albumdirectory)
         print "  Picasa: %s" % (picasa_description)
-        print "  iPhoto: %s" % (iphoto_description.strip())
+        print "  iPhoto: %s" % (su.fsenc(iphoto_description.strip()))
 
 class ExportLibrary(object):
   """The root of the export tree."""
@@ -470,11 +473,11 @@ class ExportLibrary(object):
     """Walks trough an iPhoto album tree, and discovers albums (directories)."""
     entries = 0
 
-    include_pattern = re.compile(includes.decode(sys.getfilesystemencoding()))
+    include_pattern = re.compile(su.fsdec(includes))
     exclude_pattern = None
     if excludes:
-      exclude_pattern = re.compile(excludes.decode(sys.getfilesystemencoding()))
-      
+      exclude_pattern = re.compile(su.fsdec(decodes))
+            
     # first, do the sub-albums
     for sub_album in albums:
       sub_name = sub_album.name
