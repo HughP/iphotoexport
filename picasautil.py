@@ -37,7 +37,7 @@ def get_picasa_folder_data(folder):
     f = open(path)
     item_data = {}
     for line in f:
-      line = line.strip()
+      line = su.fsdec(line).strip()
       if line.startswith("[") and line.endswith("]"):
         key = line[1:len(line) - 1]
         item_data = {}
@@ -90,7 +90,6 @@ def check_face_keywords(path, faces):
   needs_update = False
   for face in faces:
     if not face in file_keywords:
-      print path + " is missing " + face
       file_keywords.append(face)
       needs_update = True
       
@@ -98,7 +97,7 @@ def check_face_keywords(path, faces):
     new_keywords = []
     for keyword in file_keywords:
       new_keywords.append(su.fsenc(keyword))
-    exiftool.update_iptcdata(path, None, file_keywords, None, None)
+    exiftool.update_iptcdata(path, None, file_keywords, None, None, None)
   
   
 def process_face_keywords(folder, contacts):

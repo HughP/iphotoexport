@@ -27,14 +27,14 @@ import time
 from xml.dom import minidom
 from xml import parsers
 
-import systemutils
+import systemutils as su
 
 _EXIFTOOL = "/usr/bin/exiftool"
 
 def check_exif_tool():
   """Tests if a compatible version of exiftool is available."""
   try:
-    output = systemutils.execandcombine((_EXIFTOOL, "-ver"))
+    output = su.execandcombine((_EXIFTOOL, "-ver"))
     version = float(output)
     if version < 7.47:
       print >> sys.stderr, "You have version " + str(version) + " of exiftool."
@@ -56,7 +56,7 @@ copy from http://www.sno.phy.queensu.ca/~phil/exiftool/.
 def get_iptc_data(image_file):
   """get caption, keywords, datetime, rating, and GPS info all in one 
      operation."""
-  output = systemutils.execandcombine(
+  output = su.execandcombine(
       (_EXIFTOOL, "-X", "-m", "-q", "-q", '-c', '%.6f', "-Keywords", 
        "-Caption-Abstract", "-DateTimeOriginal", "-Rating", "-GPSLatitude", 
        "-GPSLongitude", "%s" % (image_file.encode('utf8'))))
@@ -160,7 +160,7 @@ def update_iptcdata(filepath, new_caption, new_keywords, new_datetime,
       command.append('-GPSLongitudeRef=W')
   command.append("-iptc:CodedCharacterSet=ESC % G")
   command.append(filepath)
-  result = systemutils.execandcombine(command)
+  result = su.execandcombine(command)
   if tmp:
     os.remove(tmp)
   if result == "1 image files updated":

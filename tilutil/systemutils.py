@@ -24,6 +24,8 @@ import subprocess
 import sys
 import unicodedata
 
+_sysenc = sys.getfilesystemencoding()
+
 def execandcombine(command):
   """execute a shell command, and return all output in a single string."""
   data = execandcapture(command)
@@ -72,7 +74,13 @@ def fsenc(value):
   '''Helper to encode a string using the system encoding'''
   if not value:
     return ""
-  return value.encode(sys.getfilesystemencoding(), "replace")
+  return value.encode(_sysenc, "replace")
+
+def fsdec(value):
+  '''Helper to decode a string using the system encoding'''
+  if not value:
+    return ""
+  return value.decode(_sysenc)
 
 def getfilebasename(file_path):
   """returns the name of a file, without the extension. "/a/b/c.txt" -> "c"."""
