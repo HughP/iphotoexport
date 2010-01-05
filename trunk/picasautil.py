@@ -60,27 +60,38 @@ def get_picasa_data_value(picasa_folder_data, section, key, default=""):
     return default
   return value
 
-def get_picasa_contacts():
+def get_picasa_contacts(alt_files=None):
   """Reads the Picasa contacts.xml file, and returns a map from id to
-     nick name."""
+     nick name. Merges in data from alternate files."""
   contacts_path = os.path.join(os.environ.get('HOME'),
       "Library/Application Support/Google/Picasa3/contacts/contacts.xml")
   if not os.path.exists(contacts_path):
     raise IOError, "Picasa contacts file not found at " + contacts_path
   contacts = {}
-  
+  _parse_picasa_contacts(contacts_path, contacts)
+  if alt_files:
+    for alt_file in alt_files:
+      _parse_picasa_contacts(alt_file, contacts)
+  return contacts
+
+def _parse_picasa_contacts(contacts_path, contacts):
+  """Reads a Picasa contacts XML file, and adds it to the contacts map.
+     Will not overwrite existing entries."""
   try: 
     xml_data = minidom.parse(contacts_path)
     for xml_contacts in xml_data.getElementsByTagName("contacts"):
       for xml_contact in xml_contacts.getElementsByTagName("contact"):
-        contacts[xml_contact.getAttribute("id")] = \
-                     xml_contact.getAttribute("display")
+        face_id = xml_contact.getAttribute("id")
+        if not contacts.get(face_id):
+          nick_name = xml_contact.getAttribute("display")
+          if not nick_name:
+            # no display name -> fall back on full name
+            nick_name = xml_contact.getAttribute("name")
+          contacts[face_id] = nick_name
     xml_data.unlink()
   except parsers.expat.ExpatError, ex:
     print >> sys.stderr, "Could not parse contacts database %s: %s" % (
         contacts_path, ex)
-  return contacts
-
 
 def check_face_keywords(path, faces):
   """Checks the keywords of an image, and makes sure all the faces are 

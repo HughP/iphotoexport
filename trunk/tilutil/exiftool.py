@@ -85,14 +85,18 @@ def get_iptc_data(image_file):
           caption = xml_caption.firstChild.nodeValue
         for xml_element in xml_data.getElementsByTagName(
             "ExifIFD:DateTimeOriginal"):
-          date_time_original = time.strptime(xml_element.firstChild.nodeValue,
-                                             "%Y:%m:%d %H:%M:%S")
-          date_time_original = datetime.datetime(date_time_original.tm_year,
-                                                 date_time_original.tm_mon,
-                                                 date_time_original.tm_mday,
-                                                 date_time_original.tm_hour,
-                                                 date_time_original.tm_min,
-                                                 date_time_original.tm_sec)
+          try:
+            date_time_original = time.strptime(xml_element.firstChild.nodeValue,
+                                               "%Y:%m:%d %H:%M:%S")
+            date_time_original = datetime.datetime(date_time_original.tm_year,
+                                                   date_time_original.tm_mon,
+                                                   date_time_original.tm_mday,
+                                                   date_time_original.tm_hour,
+                                                   date_time_original.tm_min,
+                                                   date_time_original.tm_sec)
+          except ValueError, ve:
+            print >> sys.stderr, "Exiftool returned an invalid date %s for %s - ignoring." % (
+                xml_element.firstChild.nodeValue, su.fsenc(image_file))
         for xml_rating in xml_data.getElementsByTagName("XMP-xmp:Rating"):
           rating = int(xml_rating.firstChild.nodeValue)
         for xml_element in xml_data.getElementsByTagName(

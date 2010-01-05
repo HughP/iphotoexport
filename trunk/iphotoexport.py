@@ -32,7 +32,7 @@ import picasautil
 
 # Maximum diff in file size to be not considered a change (to allow for
 # meta data updates for example)
-_MAX_FILE_DIFF = 30000
+_MAX_FILE_DIFF = 35000
 
 # TODO: make this list configurable
 _IGNORE_LIST = ("pspbrwse.jbf", "thumbs.db", "desktop.ini",
@@ -154,7 +154,13 @@ def copy_or_link_file(source, target, options):
       if result:
         print >> sys.stderr, "%s: %s" % (su.fsenc(source), result)
     else:
-      macostools.copy(source, target)
+      result = su.execandcombine([ 'cp', '-fp', source, target ])
+      if result:
+        print >> sys.stderr, "%s: %s" % (su.fsenc(source), result)
+      # The above does not work with file aliases found in iPhoto reference
+      # libraries. macostools.copy() can handle file aliases, but doesn't work
+      # on 64-bit Python installations.
+      # macostools.copy(source, target)
   except OSError, ose:
     print >> sys.stderr, "%s: %s" % (su.fsenc(source), ose)
 
@@ -476,7 +482,7 @@ class ExportLibrary(object):
     include_pattern = re.compile(su.fsdec(includes))
     exclude_pattern = None
     if excludes:
-      exclude_pattern = re.compile(su.fsdec(decodes))
+      exclude_pattern = re.compile(su.fsdec(excludes))
             
     # first, do the sub-albums
     for sub_album in albums:
@@ -710,8 +716,7 @@ def main():
     return 1
   
   album_xml_file = iphotodata.get_album_xmlfile(library_dir)
-  data = iphotodata.get_iphoto_data(library_dir, album_xml_file, options.faces,
-                                    options.places)
+  data = iphotodata.get_iphoto_data(library_dir, album_xml_file, options.places)
   exclude_folders = []
   if options.excludefolders:
     exclude_folders = options.excludefolders.split(",")
