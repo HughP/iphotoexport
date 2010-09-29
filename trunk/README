@@ -1,20 +1,20 @@
-iphotoexport allows you to export and synchronize your iPhoto library to a 
+phoshare allows you to export and synchronize your iPhoto library to a 
 folder tree. It preserves both the original and modified image, your event 
 and album organization, and applies your iPhoto titles, descriptions, 
 keywords, and face tags to the IPTC/EXIF metadata of your images. You can
 export a full copy of your library, or just build a tree of linked images
-that require very little additional disk space. You can re-run iphotoexport
+that require very little additional disk space. You can re-run phoshare
 at any time to synchronize any changes made in iPhoto to your export tree
-quickly. iphotoexport works well with file-system based photo management
+quickly. phoshare works well with file-system based photo management
 tools like Picasa or Adobe Bridge.
 
-iphotoexport is written in Python, and can easily be customized.
+phoshare is written in Python, and can easily be customized.
 
-Downloads at http://code.google.com/p/iphotoexport/
-Documenation at https://sites.google.com/site/iphotoexport/
+Downloads at http://code.google.com/p/phoshare/
+Documenation at https://sites.google.com/site/phoshare/
 
 
-Copyright 2009 Tilman Sporkert
+Copyright 2010 Google Inc.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
